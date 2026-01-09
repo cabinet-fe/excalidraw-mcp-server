@@ -1,0 +1,20 @@
+{
+  "name": "@excalidraw-mcp/server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "node dist/index.js",
+    "build": "bun build src/index.ts --outdir dist --target node --production"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.14.3",
+    "@hono/node-ws": "^1.1.1",
+    "hono": "^4.7.13"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "typescript": "^5.9.3"
+  }
+}

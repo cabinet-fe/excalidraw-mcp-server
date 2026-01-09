@@ -1,0 +1,44 @@
+{
+  "name": "excalidraw-mcp-server",
+  "version": "0.0.1",
+  "description": "MCP server for Excalidraw - allows AI assistants to interact with Excalidraw canvas",
+  "type": "module",
+  "bin": {
+    "excalidraw-mcp-server": "./dist/bin/cli.mjs"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "types": "./dist/index.d.mts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "dev": "bun run src/bin/cli.ts",
+    "build": "tsdown"
+  },
+  "keywords": [
+    "mcp",
+    "excalidraw",
+    "ai",
+    "whiteboard",
+    "drawing"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
+    "commander": "^14.0.2",
+    "zod": "^4.3.5"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "tsdown": "^0.18.4",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
