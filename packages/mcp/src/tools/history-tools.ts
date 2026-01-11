@@ -15,11 +15,11 @@ export function registerHistoryTools(server: McpServer, client: ExcalidrawClient
       inputSchema: {},
     },
     async () => {
-      const success = await client.undo()
+      await client.undo()
       return {
         content: [{
           type: 'text',
-          text: success ? 'Undo successful' : 'Nothing to undo',
+          text: 'Undo command sent',
         }],
       }
     }
@@ -35,11 +35,11 @@ export function registerHistoryTools(server: McpServer, client: ExcalidrawClient
       inputSchema: {},
     },
     async () => {
-      const success = await client.redo()
+      await client.redo()
       return {
         content: [{
           type: 'text',
-          text: success ? 'Redo successful' : 'Nothing to redo',
+          text: 'Redo command sent',
         }],
       }
     }

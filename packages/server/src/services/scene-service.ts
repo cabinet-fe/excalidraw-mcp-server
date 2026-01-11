@@ -6,311 +6,171 @@ import type {
   SceneUpdateData,
 } from '../types'
 
-/** 历史记录快照 */
-interface HistorySnapshot {
-  elements: ExcalidrawElement[]
-  appState: PartialAppState
-  timestamp: number
-}
-
-/** 历史记录配置 */
-interface HistoryConfig {
-  maxSize: number
-}
-
-const DEFAULT_HISTORY_CONFIG: HistoryConfig = {
-  maxSize: 100,
-}
-
-const DEFAULT_APP_STATE: PartialAppState = {
-  viewBackgroundColor: '#ffffff',
-}
-
 /**
  * 场景服务
- * 管理当前画布场景的状态，提供读写接口供 API 和 WebSocket 使用
- * 支持历史记录管理（undo/redo）
+ * 管理多个画布场景的状态，提供读写接口供 API 和 WebSocket 使用
+ * 注意：场景数据主要存储在前端 IndexedDB，服务器仅作为中转缓存
  */
 export class SceneService {
-  private elements: ExcalidrawElement[] = []
-  private appState: PartialAppState = { ...DEFAULT_APP_STATE }
-  private files: BinaryFiles = {}
-
-  /** 历史记录栈（undo） */
-  private historyStack: HistorySnapshot[] = []
-  /** 重做栈 */
-  private redoStack: HistorySnapshot[] = []
-  /** 历史记录配置 */
-  private historyConfig: HistoryConfig
-
-  /** 场景变更回调列表 */
-  private changeListeners: Set<(scene: SceneData) => void> = new Set()
-
-  constructor(config?: Partial<HistoryConfig>) {
-    this.historyConfig = { ...DEFAULT_HISTORY_CONFIG, ...config }
-  }
-
-  // ===========================================================================
-  // 读取方法
-  // ===========================================================================
+  /** 场景缓存：sceneId -> SceneData */
+  private scenes: Map<string, SceneData> = new Map()
 
   /**
-   * 获取当前场景的所有元素（不含已删除）
+   * 获取场景数据
    */
-  getElements(): readonly ExcalidrawElement[] {
-    return this.elements.filter((el) => !el.isDeleted)
+  getScene(sceneId: string): SceneData | null {
+    return this.scenes.get(sceneId) ?? null
   }
 
   /**
-   * 获取当前场景的所有元素（含已删除）
+   * 获取场景的元素（不含已删除）
    */
-  getAllElements(): readonly ExcalidrawElement[] {
-    return [...this.elements]
+  getElements(sceneId: string): readonly ExcalidrawElement[] {
+    const scene = this.scenes.get(sceneId)
+    if (!scene) return []
+    return (scene.elements as ExcalidrawElement[]).filter((el) => !el.isDeleted)
+  }
+
+  /**
+   * 获取场景的所有元素（含已删除）
+   */
+  getAllElements(sceneId: string): readonly ExcalidrawElement[] {
+    const scene = this.scenes.get(sceneId)
+    if (!scene) return []
+    return scene.elements as ExcalidrawElement[]
   }
 
   /**
    * 根据 ID 获取元素
    */
-  getElementById(id: string): ExcalidrawElement | undefined {
-    return this.elements.find((el) => el.id === id)
+  getElementById(sceneId: string, elementId: string): ExcalidrawElement | undefined {
+    const scene = this.scenes.get(sceneId)
+    if (!scene) return undefined
+    return (scene.elements as ExcalidrawElement[]).find((el) => el.id === elementId)
   }
 
   /**
-   * 获取当前应用状态
+   * 获取场景的应用状态
    */
-  getAppState(): PartialAppState {
-    return { ...this.appState }
+  getAppState(sceneId: string): PartialAppState {
+    const scene = this.scenes.get(sceneId)
+    return scene?.appState ?? { viewBackgroundColor: '#ffffff' }
   }
 
   /**
-   * 获取当前场景的所有文件
+   * 获取场景的文件
    */
-  getFiles(): BinaryFiles {
-    return { ...this.files }
+  getFiles(sceneId: string): BinaryFiles {
+    const scene = this.scenes.get(sceneId)
+    return (scene?.files ?? {}) as BinaryFiles
   }
-
-  /**
-   * 获取完整场景数据
-   */
-  getScene(): SceneData {
-    return {
-      elements: this.getElements(),
-      appState: this.getAppState(),
-      files: this.getFiles(),
-    }
-  }
-
-  /**
-   * 获取完整场景数据（含已删除元素）
-   */
-  getFullScene(): SceneData {
-    return {
-      elements: this.getAllElements(),
-      appState: this.getAppState(),
-      files: this.getFiles(),
-    }
-  }
-
-  // ===========================================================================
-  // 写入方法
-  // ===========================================================================
 
   /**
    * 更新场景
-   * @param data 场景更新数据
-   * @param saveHistory 是否保存到历史记录，默认 true
    */
-  updateScene(data: SceneUpdateData, saveHistory = true): void {
-    if (saveHistory) {
-      this.saveToHistory()
+  updateScene(sceneId: string, data: SceneUpdateData): void {
+    const existing = this.scenes.get(sceneId) ?? {
+      elements: [],
+      appState: { viewBackgroundColor: '#ffffff' },
+      files: {},
     }
 
-    if (data.elements !== undefined) {
-      this.elements = [...data.elements] as ExcalidrawElement[]
-    }
-    if (data.appState !== undefined) {
-      this.appState = { ...this.appState, ...data.appState }
-    }
-    if (data.files !== undefined) {
-      this.files = { ...this.files, ...data.files }
+    const updated: SceneData = {
+      elements: data.elements ?? existing.elements,
+      appState: data.appState ? { ...existing.appState, ...data.appState } : existing.appState,
+      files: data.files ? { ...existing.files, ...data.files } : existing.files,
     }
 
-    // 清空重做栈（新操作会使重做失效）
-    if (saveHistory) {
-      this.redoStack = []
-    }
-
-    this.notifyListeners()
+    this.scenes.set(sceneId, updated)
   }
 
   /**
    * 重置场景
    */
-  resetScene(): void {
-    this.saveToHistory()
-    this.elements = []
-    this.appState = { ...DEFAULT_APP_STATE }
-    this.files = {}
-    this.redoStack = []
-    this.notifyListeners()
+  resetScene(sceneId: string): void {
+    this.scenes.set(sceneId, {
+      elements: [],
+      appState: { viewBackgroundColor: '#ffffff' },
+      files: {},
+    })
+  }
+
+  /**
+   * 删除场景缓存
+   */
+  deleteScene(sceneId: string): boolean {
+    return this.scenes.delete(sceneId)
   }
 
   /**
    * 添加元素
    */
-  addElement(element: ExcalidrawElement): void {
-    this.saveToHistory()
-    this.elements = [...this.elements, element]
-    this.redoStack = []
-    this.notifyListeners()
+  addElement(sceneId: string, element: ExcalidrawElement): void {
+    const existing = this.getScene(sceneId)
+    const elements = existing ? [...existing.elements, element] : [element]
+    this.updateScene(sceneId, { elements })
   }
 
   /**
    * 批量添加元素
    */
-  addElements(elements: readonly ExcalidrawElement[]): void {
-    this.saveToHistory()
-    this.elements = [...this.elements, ...elements]
-    this.redoStack = []
-    this.notifyListeners()
+  addElements(sceneId: string, newElements: readonly ExcalidrawElement[]): void {
+    const existing = this.getScene(sceneId)
+    const elements = existing ? [...existing.elements, ...newElements] : [...newElements]
+    this.updateScene(sceneId, { elements })
   }
 
   /**
    * 更新元素
    */
-  updateElement(id: string, updates: Partial<ExcalidrawElement>): boolean {
-    const index = this.elements.findIndex((el) => el.id === id)
+  updateElement(sceneId: string, elementId: string, updates: Partial<ExcalidrawElement>): boolean {
+    const scene = this.scenes.get(sceneId)
+    if (!scene) return false
+
+    const elements = scene.elements as ExcalidrawElement[]
+    const index = elements.findIndex((el) => el.id === elementId)
     if (index === -1) return false
 
-    const element = this.elements[index]
+    const element = elements[index]
     if (!element) return false
 
-    this.saveToHistory()
-    this.elements = [
-      ...this.elements.slice(0, index),
+    const updatedElements = [
+      ...elements.slice(0, index),
       { ...element, ...updates, version: element.version + 1 },
-      ...this.elements.slice(index + 1),
+      ...elements.slice(index + 1),
     ]
-    this.redoStack = []
-    this.notifyListeners()
+
+    this.updateScene(sceneId, { elements: updatedElements })
     return true
   }
 
   /**
    * 删除元素（软删除）
    */
-  deleteElement(id: string): boolean {
-    return this.updateElement(id, { isDeleted: true })
+  deleteElement(sceneId: string, elementId: string): boolean {
+    return this.updateElement(sceneId, elementId, { isDeleted: true })
   }
 
   /**
    * 添加文件
    */
-  addFiles(files: BinaryFiles): void {
-    this.files = { ...this.files, ...files }
-    this.notifyListeners()
-  }
-
-  // ===========================================================================
-  // 历史记录方法
-  // ===========================================================================
-
-  /**
-   * 撤销操作
-   */
-  undo(): boolean {
-    const snapshot = this.historyStack.pop()
-    if (!snapshot) return false
-
-    // 保存当前状态到重做栈
-    this.redoStack.push({
-      elements: [...this.elements],
-      appState: { ...this.appState },
-      timestamp: Date.now(),
-    })
-
-    // 恢复快照
-    this.elements = snapshot.elements
-    this.appState = snapshot.appState
-    this.notifyListeners()
-    return true
+  addFiles(sceneId: string, files: BinaryFiles): void {
+    const existing = this.getFiles(sceneId)
+    this.updateScene(sceneId, { files: { ...existing, ...files } })
   }
 
   /**
-   * 重做操作
+   * 获取所有活跃场景 ID
    */
-  redo(): boolean {
-    const snapshot = this.redoStack.pop()
-    if (!snapshot) return false
-
-    // 保存当前状态到历史栈
-    this.historyStack.push({
-      elements: [...this.elements],
-      appState: { ...this.appState },
-      timestamp: Date.now(),
-    })
-
-    // 恢复快照
-    this.elements = snapshot.elements
-    this.appState = snapshot.appState
-    this.notifyListeners()
-    return true
+  getActiveSceneIds(): string[] {
+    return Array.from(this.scenes.keys())
   }
 
   /**
-   * 清空历史记录
+   * 检查场景是否存在缓存
    */
-  clearHistory(): void {
-    this.historyStack = []
-    this.redoStack = []
-  }
-
-  /**
-   * 获取历史记录状态
-   */
-  getHistoryState(): { canUndo: boolean; canRedo: boolean; undoCount: number; redoCount: number } {
-    return {
-      canUndo: this.historyStack.length > 0,
-      canRedo: this.redoStack.length > 0,
-      undoCount: this.historyStack.length,
-      redoCount: this.redoStack.length,
-    }
-  }
-
-  // ===========================================================================
-  // 订阅方法
-  // ===========================================================================
-
-  /**
-   * 订阅场景变更
-   */
-  subscribe(listener: (scene: SceneData) => void): () => void {
-    this.changeListeners.add(listener)
-    return () => this.changeListeners.delete(listener)
-  }
-
-  // ===========================================================================
-  // 私有方法
-  // ===========================================================================
-
-  private saveToHistory(): void {
-    this.historyStack.push({
-      elements: [...this.elements],
-      appState: { ...this.appState },
-      timestamp: Date.now(),
-    })
-
-    // 限制历史记录大小
-    if (this.historyStack.length > this.historyConfig.maxSize) {
-      this.historyStack.shift()
-    }
-  }
-
-  private notifyListeners(): void {
-    const scene = this.getScene()
-    for (const listener of this.changeListeners) {
-      listener(scene)
-    }
+  hasScene(sceneId: string): boolean {
+    return this.scenes.has(sceneId)
   }
 }
 

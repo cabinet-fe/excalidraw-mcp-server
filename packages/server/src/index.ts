@@ -6,9 +6,9 @@ import { serveStatic } from '@hono/node-server/serve-static'
 import { createNodeWebSocket } from '@hono/node-ws'
 
 import { createApiRoutes } from './routes/api'
-import { SceneService } from './services/scene-service'
-import { LibraryService } from './services/library-service'
-import { CommandService } from './services/command-service'
+import { sceneService } from './services/scene-service'
+import { libraryService } from './services/library-service'
+import { commandService } from './services/command-service'
 import { createWebSocketHandler } from './ws/handler'
 
 const app = new Hono()
@@ -17,10 +17,8 @@ const app = new Hono()
 app.use('*', logger())
 app.use('*', cors())
 
-// 初始化服务
-const sceneService = new SceneService()
-const libraryService = new LibraryService()
-const commandService = new CommandService()
+// 注：场景变更广播现在通过 CommandService 的房间机制处理
+// 不再需要全局 subscribe
 
 // 创建 WebSocket 适配器
 const { injectWebSocket, upgradeWebSocket } = createNodeWebSocket({ app })
@@ -41,6 +39,7 @@ app.route('/api', createApiRoutes({
 // 静态文件托管（仅生产环境）
 const isProduction = process.env.NODE_ENV === 'production'
 if (isProduction) {
+  // 修正：Vite 构建产物在 dist/public
   app.use('/*', serveStatic({ root: './public' }))
 }
 

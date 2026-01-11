@@ -25,7 +25,7 @@
 │  │                    MCP Server (NPM Package)                   │   │
 │  │                  npx excalidraw-mcp-server                    │   │
 │  │                                                               │   │
-│  │  传输方式: Streamable HTTP (暂不支持本地 stdio 模式)           │   │
+│  │  传输方式: stdio (本地) 或 Streamable HTTP (远程)          │   │
 │  └───────────────────────────────────────────────────────────────┘   │
 │                                    ▲                                  │
 │                                    │ MCP Protocol                     │
@@ -41,21 +41,25 @@
 ### MCP Server (NPM 包)
 
 ```bash
-# 连接远程服务器（Streamable HTTP 传输）
-npx excalidraw-mcp-server --transport http --server https://excalidraw.example.com
+# 本地使用（默认，适用于 Claude Desktop / Cursor 等）
+npx excalidraw-mcp-server --server https://excalidraw.example.com
 
-# 使用简写参数
-npx excalidraw-mcp-server -t http -s https://excalidraw.example.com
+# 指定传输方式为 stdio
+npx excalidraw-mcp-server --transport stdio --server https://excalidraw.example.com
+
+# 启动 HTTP 服务（Streamable HTTP 传输）
+npx excalidraw-mcp-server --transport http --server https://excalidraw.example.com --port 3001
 ```
 
-> **注意**: 当前版本暂不支持本地 stdio 模式，必须指定远程服务器地址。
+> **注意**: 默认使用 stdio 模式，方便 AI 客户端直接调用。如果需要跨网络访问，请使用 http 模式。
 
 ### CLI 参数
 
 | 参数 | 类型 | 默认值 | 说明 |
 |------|------|--------|------|
-| `--transport`, `-t` | `http` | - | 传输方式 (必填) |
+| `--transport`, `-t` | `http` \| `stdio` | `stdio` | 传输方式 |
 | `--server`, `-s` | `string` | - | 后端服务地址 (必填) |
+| `--port`, `-p` | `number` | `3001` | HTTP 服务端口 (仅限 http 模式) |
 | `--help`, `-h` | - | - | 显示帮助信息 |
 | `--version`, `-v` | - | - | 显示版本号 |
 

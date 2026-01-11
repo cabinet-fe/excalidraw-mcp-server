@@ -1,4 +1,4 @@
-import { z } from 'zod/v3'
+import { z } from 'zod'
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import type { ExcalidrawClient } from '../client'
 import { randomId } from '../utils/random-id'
@@ -158,26 +158,7 @@ export function registerElementTools(server: McpServer, client: ExcalidrawClient
         endArrowhead: ArrowheadSchema.optional().default('arrow').describe('End arrowhead type (for arrows)'),
       },
     },
-    async (args: {
-      type: string
-      x: number
-      y: number
-      width?: number
-      height?: number
-      strokeColor?: string
-      backgroundColor?: string
-      fillStyle?: string
-      strokeWidth?: number
-      strokeStyle?: string
-      roughness?: number
-      opacity?: number
-      text?: string
-      fontSize?: number
-      fontFamily?: number
-      points?: [number, number][]
-      startArrowhead?: string | null
-      endArrowhead?: string | null
-    }) => {
+    async (args: any) => {
       const element = createExcalidrawElement(args)
       const result = await client.addElement(element)
       return {

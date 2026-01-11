@@ -21,33 +21,47 @@ export interface ApiRouteDependencies {
 /**
  * 创建 API 路由
  * 提供 RESTful 接口供 MCP Server 调用
+ * 所有场景相关接口都需要 sceneId 参数
  */
 export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   const { sceneService, libraryService, commandService } = deps
   const api = new Hono()
 
   // ===========================================================================
-  // 场景管理
+  // 场景管理 - 所有接口都需要 sceneId
   // ===========================================================================
 
   /**
-   * 获取当前场景
+   * 获取场景
    */
-  api.get('/scene', (c) => {
+  api.get('/scene/:sceneId', (c) => {
+    const sceneId = c.req.param('sceneId')
+    const scene = sceneService.getScene(sceneId)
+    if (!scene) {
+      return c.json({
+        success: true,
+        data: {
+          elements: [],
+          appState: { viewBackgroundColor: '#ffffff' },
+          files: {},
+        },
+      })
+    }
     return c.json({
       success: true,
-      data: sceneService.getScene(),
+      data: scene,
     })
   })
 
   /**
    * 获取场景元素
    */
-  api.get('/elements', (c) => {
+  api.get('/scene/:sceneId/elements', (c) => {
+    const sceneId = c.req.param('sceneId')
     const includeDeleted = c.req.query('includeDeleted') === 'true'
     const elements = includeDeleted
-      ? sceneService.getAllElements()
-      : sceneService.getElements()
+      ? sceneService.getAllElements(sceneId)
+      : sceneService.getElements(sceneId)
     return c.json({
       success: true,
       data: elements,
@@ -57,40 +71,47 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 获取应用状态
    */
-  api.get('/app-state', (c) => {
+  api.get('/scene/:sceneId/app-state', (c) => {
+    const sceneId = c.req.param('sceneId')
     return c.json({
       success: true,
-      data: sceneService.getAppState(),
+      data: sceneService.getAppState(sceneId),
     })
   })
 
   /**
    * 获取所有文件
    */
-  api.get('/files', (c) => {
+  api.get('/scene/:sceneId/files', (c) => {
+    const sceneId = c.req.param('sceneId')
     return c.json({
       success: true,
-      data: sceneService.getFiles(),
+      data: sceneService.getFiles(sceneId),
     })
   })
 
   /**
    * 更新场景
    */
-  api.post('/scene', async (c) => {
+  api.post('/scene/:sceneId', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const body = (await c.req.json()) as SceneUpdateData
-    sceneService.updateScene(body)
-    // 同步到所有客户端
-    commandService.syncScene(sceneService.getScene())
+    sceneService.updateScene(sceneId, body)
+    // 同步到房间内的所有客户端
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true })
   })
 
   /**
    * 重置场景
    */
-  api.post('/scene/reset', (c) => {
-    sceneService.resetScene()
-    commandService.resetScene()
+  api.post('/scene/:sceneId/reset', (c) => {
+    const sceneId = c.req.param('sceneId')
+    sceneService.resetScene(sceneId)
+    commandService.resetSceneInRoom(sceneId)
     return c.json({ success: true })
   })
 
@@ -101,67 +122,84 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 添加元素
    */
-  api.post('/elements', async (c) => {
+  api.post('/scene/:sceneId/elements', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const element = (await c.req.json()) as ExcalidrawElement
-    sceneService.addElement(element)
-    commandService.syncScene(sceneService.getScene())
+    sceneService.addElement(sceneId, element)
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true, data: { id: element.id } })
   })
 
   /**
    * 批量添加元素
    */
-  api.post('/elements/batch', async (c) => {
+  api.post('/scene/:sceneId/elements/batch', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const elements = (await c.req.json()) as ExcalidrawElement[]
-    sceneService.addElements(elements)
-    commandService.syncScene(sceneService.getScene())
+    sceneService.addElements(sceneId, elements)
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true, data: { count: elements.length } })
   })
 
   /**
    * 更新元素
    */
-  api.patch('/elements/:id', async (c) => {
-    const id = c.req.param('id')
+  api.patch('/scene/:sceneId/elements/:elementId', async (c) => {
+    const sceneId = c.req.param('sceneId')
+    const elementId = c.req.param('elementId')
     const updates = (await c.req.json()) as Partial<ExcalidrawElement>
-    const success = sceneService.updateElement(id, updates)
+    const success = sceneService.updateElement(sceneId, elementId, updates)
     if (!success) {
       return c.json({ success: false, error: 'Element not found' }, 404)
     }
-    commandService.syncScene(sceneService.getScene())
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true })
   })
 
   /**
    * 删除元素
    */
-  api.delete('/elements/:id', (c) => {
-    const id = c.req.param('id')
-    const success = sceneService.deleteElement(id)
+  api.delete('/scene/:sceneId/elements/:elementId', (c) => {
+    const sceneId = c.req.param('sceneId')
+    const elementId = c.req.param('elementId')
+    const success = sceneService.deleteElement(sceneId, elementId)
     if (!success) {
       return c.json({ success: false, error: 'Element not found' }, 404)
     }
-    commandService.syncScene(sceneService.getScene())
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true })
   })
 
   /**
    * 滚动到内容
    */
-  api.post('/scroll-to', async (c) => {
+  api.post('/scene/:sceneId/scroll-to', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const body = (await c.req.json()) as { elementId?: string; elementIds?: string[] }
 
     let target: ExcalidrawElement | readonly ExcalidrawElement[]
 
     if (body.elementId) {
-      const element = sceneService.getElementById(body.elementId)
+      const element = sceneService.getElementById(sceneId, body.elementId)
       if (!element) {
         return c.json({ success: false, error: 'Element not found' }, 404)
       }
       target = element
     } else if (body.elementIds && body.elementIds.length > 0) {
       const elements = body.elementIds
-        .map((id) => sceneService.getElementById(id))
+        .map((id) => sceneService.getElementById(sceneId, id))
         .filter((el): el is ExcalidrawElement => el !== undefined)
       if (elements.length === 0) {
         return c.json({ success: false, error: 'No elements found' }, 404)
@@ -169,10 +207,10 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
       target = elements
     } else {
       // 滚动到所有内容
-      target = sceneService.getElements() as ExcalidrawElement[]
+      target = sceneService.getElements(sceneId) as ExcalidrawElement[]
     }
 
-    commandService.scrollToContent(target)
+    commandService.scrollToContent(sceneId, target)
     return c.json({ success: true })
   })
 
@@ -183,15 +221,19 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 添加文件
    */
-  api.post('/files', async (c) => {
+  api.post('/scene/:sceneId/files', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const files = (await c.req.json()) as BinaryFiles
-    sceneService.addFiles(files)
-    commandService.syncScene(sceneService.getScene())
+    sceneService.addFiles(sceneId, files)
+    const scene = sceneService.getScene(sceneId)
+    if (scene) {
+      commandService.syncSceneToRoom(sceneId, scene)
+    }
     return c.json({ success: true })
   })
 
   // ===========================================================================
-  // 库管理
+  // 库管理 - 库是全局的，不需要 sceneId
   // ===========================================================================
 
   /**
@@ -235,86 +277,72 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   })
 
   // ===========================================================================
-  // 历史记录
-  // ===========================================================================
-
-  /**
-   * 获取历史记录状态
-   */
-  api.get('/history', (c) => {
-    return c.json({
-      success: true,
-      data: sceneService.getHistoryState(),
-    })
-  })
-
-  /**
-   * 撤销
-   */
-  api.post('/undo', (c) => {
-    const success = sceneService.undo()
-    if (success) {
-      commandService.syncScene(sceneService.getScene())
-    }
-    return c.json({ success })
-  })
-
-  /**
-   * 重做
-   */
-  api.post('/redo', (c) => {
-    const success = sceneService.redo()
-    if (success) {
-      commandService.syncScene(sceneService.getScene())
-    }
-    return c.json({ success })
-  })
-
-  /**
-   * 清空历史记录
-   */
-  api.post('/history/clear', (c) => {
-    sceneService.clearHistory()
-    commandService.clearHistory()
-    return c.json({ success: true })
-  })
-
-  // ===========================================================================
   // UI 控制
   // ===========================================================================
 
   /**
    * 设置活动工具
    */
-  api.post('/command/set-active-tool', async (c) => {
+  api.post('/scene/:sceneId/command/set-active-tool', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const body = (await c.req.json()) as { tool: string; options?: Record<string, unknown> }
-    commandService.setActiveTool(body.tool, body.options)
+    commandService.setActiveTool(sceneId, body.tool, body.options)
     return c.json({ success: true })
   })
 
   /**
    * 切换侧边栏
    */
-  api.post('/command/toggle-sidebar', async (c) => {
+  api.post('/scene/:sceneId/command/toggle-sidebar', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const body = (await c.req.json()) as { name: string; open?: boolean }
-    commandService.toggleSidebar(body.name, body.open)
+    commandService.toggleSidebar(sceneId, body.name, body.open)
     return c.json({ success: true })
   })
 
   /**
    * 设置 Toast 消息
    */
-  api.post('/command/set-toast', async (c) => {
+  api.post('/scene/:sceneId/command/set-toast', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const body = (await c.req.json()) as ToastMessage | null
-    commandService.setToast(body)
+    commandService.setToast(sceneId, body)
     return c.json({ success: true })
   })
 
   /**
    * 刷新画布
    */
-  api.post('/command/refresh', (c) => {
-    commandService.refresh()
+  api.post('/scene/:sceneId/command/refresh', (c) => {
+    const sceneId = c.req.param('sceneId')
+    commandService.refresh(sceneId)
+    return c.json({ success: true })
+  })
+
+  /**
+   * 撤销
+   */
+  api.post('/scene/:sceneId/undo', (c) => {
+    const sceneId = c.req.param('sceneId')
+    commandService.undo(sceneId)
+    return c.json({ success: true })
+  })
+
+  /**
+   * 重做
+   */
+  api.post('/scene/:sceneId/redo', (c) => {
+    const sceneId = c.req.param('sceneId')
+    commandService.redo(sceneId)
+    return c.json({ success: true })
+  })
+
+  /**
+   * 清空历史记录
+   */
+  api.post('/scene/:sceneId/history/clear', (c) => {
+    const sceneId = c.req.param('sceneId')
+    commandService.clearHistory(sceneId)
     return c.json({ success: true })
   })
 
@@ -325,20 +353,26 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 导出为 JSON
    */
-  api.get('/export/json', (c) => {
-    const scene = sceneService.getScene()
+  api.get('/scene/:sceneId/export/json', (c) => {
+    const sceneId = c.req.param('sceneId')
+    const scene = sceneService.getScene(sceneId)
     return c.json({
       success: true,
-      data: scene,
+      data: scene ?? {
+        elements: [],
+        appState: { viewBackgroundColor: '#ffffff' },
+        files: {},
+      },
     })
   })
 
   /**
    * 导出为 SVG
    */
-  api.post('/export/svg', async (c) => {
+  api.post('/scene/:sceneId/export/svg', async (c) => {
+    const sceneId = c.req.param('sceneId')
     try {
-      const result = await commandService.requestExport('svg')
+      const result = await commandService.requestExport(sceneId, 'svg')
       return c.json({
         success: true,
         data: result,
@@ -352,9 +386,10 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 导出为 PNG
    */
-  api.post('/export/png', async (c) => {
+  api.post('/scene/:sceneId/export/png', async (c) => {
+    const sceneId = c.req.param('sceneId')
     try {
-      const result = await commandService.requestExport('png')
+      const result = await commandService.requestExport(sceneId, 'png')
       return c.json({
         success: true,
         data: result,
@@ -368,21 +403,27 @@ export function createApiRoutes(deps: ApiRouteDependencies): Hono {
   /**
    * 通用导出端点
    */
-  api.post('/export/:format', async (c) => {
+  api.post('/scene/:sceneId/export/:format', async (c) => {
+    const sceneId = c.req.param('sceneId')
     const format = c.req.param('format') as ExportFormat
     if (!['svg', 'png', 'json'].includes(format)) {
       return c.json({ success: false, error: 'Invalid export format' }, 400)
     }
 
     if (format === 'json') {
+      const scene = sceneService.getScene(sceneId)
       return c.json({
         success: true,
-        data: sceneService.getScene(),
+        data: scene ?? {
+          elements: [],
+          appState: { viewBackgroundColor: '#ffffff' },
+          files: {},
+        },
       })
     }
 
     try {
-      const result = await commandService.requestExport(format)
+      const result = await commandService.requestExport(sceneId, format)
       return c.json({
         success: true,
         data: result,

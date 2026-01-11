@@ -234,6 +234,8 @@ export type WSMessageType =
   | 'export_response'
   | 'ping'
   | 'pong'
+  | 'join'
+  | 'leave'
 
 /** WebSocket 消息基础接口 */
 export interface WSMessage<T extends WSMessageType = WSMessageType, P = unknown> {
@@ -247,10 +249,22 @@ export interface SceneSyncMessage extends WSMessage<'scene_sync', SceneData> {
   payload: SceneData
 }
 
-/** 场景更新消息 */
-export interface SceneUpdateMessage extends WSMessage<'scene_update', SceneUpdateData> {
+/** 场景更新消息（包含 sceneId） */
+export interface SceneUpdateMessage extends WSMessage<'scene_update', SceneUpdateData & { sceneId: string }> {
   type: 'scene_update'
-  payload: SceneUpdateData
+  payload: SceneUpdateData & { sceneId: string }
+}
+
+/** 加入场景房间消息 */
+export interface JoinMessage extends WSMessage<'join', { sceneId: string }> {
+  type: 'join'
+  payload: { sceneId: string }
+}
+
+/** 离开场景房间消息 */
+export interface LeaveMessage extends WSMessage<'leave', { sceneId: string }> {
+  type: 'leave'
+  payload: { sceneId: string }
 }
 
 /** 元素更新消息 */
@@ -358,6 +372,8 @@ export type AnyWSMessage =
   | HistoryClearMessage
   | PingMessage
   | PongMessage
+  | JoinMessage
+  | LeaveMessage
 
 // ============================================================================
 // API 响应

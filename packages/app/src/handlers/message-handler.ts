@@ -20,19 +20,33 @@ export interface MessageHandler {
 export interface MessageHandlerDependencies {
   api: ExcalidrawImperativeAPI
   sendMessage: (message: unknown) => void
+  /** 可选：抑制同步回传，防止服务器推送后立即覆盖 */
+  suppressSync?: () => void
+  /** 可选：初始化同步完成回调，标记可以开始正常同步 */
+  onInitialSync?: () => void
 }
 
 /**
  * 创建消息处理器
  */
 export function createMessageHandler(deps: MessageHandlerDependencies): MessageHandler {
-  const { api, sendMessage } = deps
+  const { api, sendMessage, suppressSync, onInitialSync } = deps
+  let hasReceivedInitialSync = false
 
   const handlers: Record<string, (payload?: unknown) => void | Promise<void>> = {
     /**
      * 场景同步
      */
     scene_sync: (payload: unknown) => {
+      // 在更新场景前抑制回传，防止循环覆盖
+      suppressSync?.()
+
+      // 首次收到 scene_sync 时，触发初始化完成回调
+      if (!hasReceivedInitialSync) {
+        hasReceivedInitialSync = true
+        onInitialSync?.()
+      }
+
       const data = payload as SceneSyncPayload
       api.updateScene({
         elements: data.elements as Parameters<typeof api.updateScene>[0]['elements'],

@@ -55,6 +55,8 @@ export type WSMessageType =
   | 'export_response'
   | 'ping'
   | 'pong'
+  | 'join'     // 加入场景房间
+  | 'leave'    // 离开场景房间
 
 /** WebSocket 消息基础接口 */
 export interface WSMessage<T extends WSMessageType = WSMessageType, P = unknown> {
@@ -107,6 +109,24 @@ export interface ExportResponsePayload {
   mimeType: string
 }
 
+/** 加入场景房间消息 */
+export interface JoinPayload {
+  sceneId: string
+}
+
+/** 离开场景房间消息 */
+export interface LeavePayload {
+  sceneId: string
+}
+
+/** 场景更新消息（包含 sceneId） */
+export interface SceneUpdatePayload {
+  sceneId: string
+  elements?: readonly unknown[]
+  appState?: Record<string, unknown>
+  files?: Record<string, unknown>
+}
+
 /** 接收的 WebSocket 消息类型 */
 export type ReceivedWSMessage =
   | WSMessage<'scene_sync', SceneSyncPayload>
@@ -125,6 +145,9 @@ export type ReceivedWSMessage =
 
 /** 发送的 WebSocket 消息类型 */
 export type SentWSMessage =
-  | WSMessage<'scene_update', Partial<SceneData>>
+  | WSMessage<'join', JoinPayload>
+  | WSMessage<'leave', LeavePayload>
+  | WSMessage<'scene_update', SceneUpdatePayload>
   | WSMessage<'export_response', ExportResponsePayload>
   | WSMessage<'ping'>
+
