@@ -43,12 +43,18 @@ if (isProduction) {
   app.use('/*', serveStatic({ root: './public' }))
 }
 
-// 健康检查
-app.get('/health', (c) => c.json({
-  status: 'ok',
-  timestamp: Date.now(),
-  clients: commandService.getClientCount(),
-}))
+// 健康检查和连接统计
+app.get('/health', (c) => {
+  const stats = commandService.getRoomStats()
+  return c.json({
+    status: 'ok',
+    timestamp: Date.now(),
+    connections: {
+      total: stats.totalClients,
+      rooms: stats.rooms,
+    },
+  })
+})
 
 const port = Number(process.env.PORT ?? 3000)
 

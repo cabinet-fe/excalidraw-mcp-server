@@ -4,17 +4,25 @@ import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types'
 import { useWebSocket } from '../hooks/use-websocket'
 import { createMessageHandler } from '../handlers/message-handler'
 import { SceneSelector } from './scene-selector'
-import { loadScene, saveScene } from '../services/scene-storage'
+import { loadScene, saveScene, sceneExists } from '../services/scene-storage'
+import { getLastSceneId, setLastSceneId } from '../services/last-scene'
 import type { SentWSMessage } from '../types'
 
 /**
  * 主应用组件
  * 包含 Excalidraw 画板，并通过 WebSocket 与后端服务同步状态
  * 场景数据持久化到 IndexedDB，支持多场景管理
+ *
+ * 改进：
+ * - 自动恢复上次使用的场景
+ * - 场景信息栏移到右上角避免遮挡
+ * - 页面加载时主动同步缓存数据到服务端
  */
 export function App() {
   // 场景状态
   const [currentSceneId, setCurrentSceneId] = useState<string | null>(null)
+  const [showSceneSelector, setShowSceneSelector] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
   const [initialData, setInitialData] = useState<{
     elements: readonly unknown[]
     appState: Record<string, unknown>
@@ -33,16 +41,84 @@ export function App() {
   // 保存场景的防抖计时器
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  // 是否已发送初始同步
+  const hasSentInitialSyncRef = useRef(false)
+
   const { sendMessage, lastMessage, connectionStatus } = useWebSocket('/ws')
+
+  // 自动恢复上次使用的场景
+  useEffect(() => {
+    const restoreLastScene = async () => {
+      const lastId = getLastSceneId()
+      if (lastId) {
+        // 检查场景是否还存在
+        const exists = await sceneExists(lastId)
+        if (exists) {
+          const stored = await loadScene(lastId)
+          if (stored) {
+            setCurrentSceneId(lastId)
+            setInitialData({
+              elements: stored.elements,
+              appState: stored.appState,
+              files: stored.files,
+            })
+            setIsLoading(false)
+            return
+          }
+        }
+      }
+      // 无法恢复，显示选择器
+      setShowSceneSelector(true)
+      setIsLoading(false)
+    }
+
+    restoreLastScene()
+  }, [])
 
   // 保持 currentSceneIdRef 同步
   useEffect(() => {
     currentSceneIdRef.current = currentSceneId
+    // 保存到 localStorage
+    if (currentSceneId) {
+      setLastSceneId(currentSceneId)
+    }
   }, [currentSceneId])
+
+  // 连接状态变化时加入房间并同步缓存数据
+  useEffect(() => {
+    if (connectionStatus === 'connected' && currentSceneId && initialData) {
+      // 加入房间
+      sendMessage({
+        type: 'join',
+        payload: { sceneId: currentSceneId },
+      })
+
+      // 首次连接时主动同步缓存数据到服务器
+      if (!hasSentInitialSyncRef.current && initialData.elements.length > 0) {
+        hasSentInitialSyncRef.current = true
+        const filteredElements = (initialData.elements as Array<{ isDeleted?: boolean }>).filter(
+          (el) => el && !el.isDeleted
+        )
+        sendMessage({
+          type: 'scene_update',
+          payload: {
+            sceneId: currentSceneId,
+            elements: filteredElements,
+            appState: {
+              viewBackgroundColor: initialData.appState.viewBackgroundColor,
+            },
+            files: initialData.files,
+          },
+        })
+        console.log('[App] Synced cached scene data to server')
+      }
+    }
+  }, [connectionStatus, currentSceneId, initialData, sendMessage])
 
   // 场景选择处理
   const handleSceneSelect = async (sceneId: string, isNew: boolean) => {
     setCurrentSceneId(sceneId)
+    hasSentInitialSyncRef.current = false
 
     if (!isNew) {
       // 加载已有场景
@@ -63,6 +139,8 @@ export function App() {
       })
     }
 
+    setShowSceneSelector(false)
+
     // 加入场景房间
     if (connectionStatus === 'connected') {
       sendMessage({
@@ -71,16 +149,6 @@ export function App() {
       })
     }
   }
-
-  // 连接状态变化时加入房间
-  useEffect(() => {
-    if (connectionStatus === 'connected' && currentSceneId) {
-      sendMessage({
-        type: 'join',
-        payload: { sceneId: currentSceneId },
-      })
-    }
-  }, [connectionStatus, currentSceneId])
 
   // 处理 Excalidraw API 初始化
   const handleExcalidrawAPI = (api: ExcalidrawImperativeAPI) => {
@@ -192,26 +260,58 @@ export function App() {
     }
   }, [])
 
-  // 未选择场景时显示选择器
-  if (!currentSceneId) {
+  // 加载中
+  if (isLoading) {
+    return (
+      <div className="loading-container">
+        <div className="loading-spinner" />
+        <style>{`
+          .loading-container {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            background: #f8f9fa;
+          }
+          .loading-spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #e0e0e0;
+            border-top-color: #6965db;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+          }
+          @keyframes spin {
+            to { transform: rotate(360deg); }
+          }
+        `}</style>
+      </div>
+    )
+  }
+
+  // 显示场景选择器
+  if (showSceneSelector || !currentSceneId) {
     return <SceneSelector onSelect={handleSceneSelect} />
   }
 
   return (
     <div className="excalidraw-wrapper">
-      {/* 场景信息栏 */}
+      {/* 场景信息栏 - 移到右上角避免遮挡工具栏 */}
       <div className="scene-info-bar">
-        <span className="scene-id">{currentSceneId}</span>
+        <span className="scene-id" title={currentSceneId}>{currentSceneId}</span>
+        <span className={`connection-status ${connectionStatus}`} title={`连接状态: ${connectionStatus}`}>
+          {connectionStatus === 'connected' ? '●' : connectionStatus === 'connecting' ? '◐' : '○'}
+        </span>
         <button
           className="btn-switch"
           onClick={() => {
-            setCurrentSceneId(null)
-            setInitialData(null)
+            setShowSceneSelector(true)
             hasInitializedRef.current = false
             suppressSyncRef.current = true
+            hasSentInitialSyncRef.current = false
           }}
         >
-          切换场景
+          切换
         </button>
       </div>
 
@@ -240,36 +340,55 @@ export function App() {
       <style>{`
         .scene-info-bar {
           position: absolute;
-          top: 0;
+          bottom: 12px;
           left: 50%;
           transform: translateX(-50%);
           z-index: 100;
           display: flex;
           align-items: center;
-          gap: 12px;
-          padding: 8px 16px;
-          background: rgba(255, 255, 255, 0.9);
-          border-radius: 0 0 8px 8px;
+          gap: 8px;
+          padding: 6px 12px;
+          background: rgba(255, 255, 255, 0.95);
+          border-radius: 6px;
           box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
-          font-size: 13px;
+          font-size: 12px;
+          backdrop-filter: blur(8px);
         }
 
         .scene-id {
           color: #666;
           font-family: monospace;
-          max-width: 200px;
+          max-width: 120px;
           overflow: hidden;
           text-overflow: ellipsis;
           white-space: nowrap;
         }
 
+        .connection-status {
+          font-size: 10px;
+          line-height: 1;
+        }
+
+        .connection-status.connected {
+          color: #22c55e;
+        }
+
+        .connection-status.connecting {
+          color: #f59e0b;
+        }
+
+        .connection-status.disconnected,
+        .connection-status.error {
+          color: #ef4444;
+        }
+
         .btn-switch {
-          padding: 4px 12px;
+          padding: 4px 10px;
           background: #f0f0f0;
           border: none;
           border-radius: 4px;
           cursor: pointer;
-          font-size: 12px;
+          font-size: 11px;
           transition: background 0.2s;
         }
 

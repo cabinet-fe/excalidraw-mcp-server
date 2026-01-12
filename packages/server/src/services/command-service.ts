@@ -119,6 +119,25 @@ export class CommandService {
   }
 
   /**
+   * 获取所有房间的统计信息
+   */
+  getRoomStats(): { totalClients: number; rooms: Array<{ sceneId: string; clients: number }> } {
+    const roomStats: Array<{ sceneId: string; clients: number }> = []
+    let totalClients = 0
+
+    for (const [sceneId, clients] of this.rooms) {
+      const count = clients.size
+      totalClients += count
+      roomStats.push({ sceneId, clients: count })
+    }
+
+    return {
+      totalClients,
+      rooms: roomStats,
+    }
+  }
+
+  /**
    * 广播消息给指定房间的所有客户端
    */
   broadcastToRoom(sceneId: string, message: AnyWSMessage, exclude?: WSContext): void {

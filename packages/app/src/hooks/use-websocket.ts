@@ -22,9 +22,16 @@ export function useWebSocket(url: string): UseWebSocketReturn {
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const reconnectAttempts = useRef(0)
   const maxReconnectAttempts = 5
+  // 标记是否为主动关闭（组件卸载时）
+  const isClosingRef = useRef(false)
+  // 标记是否显示过连接错误
+  const hasShownErrorRef = useRef(false)
 
   // 连接 WebSocket
   const connect = () => {
+    // 如果正在关闭，不要尝试连接
+    if (isClosingRef.current) return
+
     // 构建完整的 WebSocket URL
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const wsUrl = url.startsWith('/') ? `${protocol}//${window.location.host}${url}` : url
@@ -35,7 +42,10 @@ export function useWebSocket(url: string): UseWebSocketReturn {
     ws.onopen = () => {
       setConnectionStatus('connected')
       reconnectAttempts.current = 0
-      console.log('[WebSocket] Connected')
+      hasShownErrorRef.current = false
+      if (import.meta.env.DEV) {
+        console.log('[WebSocket] Connected')
+      }
     }
 
     ws.onmessage = (event: MessageEvent<string>) => {
@@ -47,36 +57,65 @@ export function useWebSocket(url: string): UseWebSocketReturn {
       }
     }
 
-    ws.onclose = () => {
+    ws.onclose = (event: CloseEvent) => {
+      // 主动关闭时不做任何处理
+      if (isClosingRef.current) return
+
       setConnectionStatus('disconnected')
-      console.log('[WebSocket] Disconnected')
+
+      // 只在非正常关闭且开发模式时记录日志
+      if (event.code !== 1000 && event.code !== 1005 && import.meta.env.DEV) {
+        console.log(`[WebSocket] Disconnected (code: ${event.code})`)
+      }
 
       // 自动重连
       if (reconnectAttempts.current < maxReconnectAttempts) {
         const delay = Math.min(1000 * Math.pow(2, reconnectAttempts.current), 30000)
         reconnectTimeoutRef.current = setTimeout(() => {
+          if (isClosingRef.current) return
           reconnectAttempts.current++
+          if (import.meta.env.DEV) {
+            console.log(`[WebSocket] Reconnecting... (attempt ${reconnectAttempts.current})`)
+          }
           connect()
         }, delay)
       }
     }
 
     ws.onerror = () => {
+      // 主动关闭时不做任何处理
+      if (isClosingRef.current) return
+
+      // 仅在开发模式且未显示过错误时记录
+      if (import.meta.env.DEV && !hasShownErrorRef.current) {
+        hasShownErrorRef.current = true
+        console.warn('[WebSocket] Connection error - server may not be running')
+      }
       setConnectionStatus('error')
-      console.error('[WebSocket] Connection error')
     }
   }
 
   // 初始化连接
   useEffect(() => {
-    connect()
+    isClosingRef.current = false
+    hasShownErrorRef.current = false
+
+    // 添加短暂延迟，避免 React 严格模式下立即关闭的问题
+    const connectTimeout = setTimeout(() => {
+      connect()
+    }, 100)
 
     return () => {
+      // 标记为主动关闭
+      isClosingRef.current = true
+      clearTimeout(connectTimeout)
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current)
       }
       if (wsRef.current) {
-        wsRef.current.close()
+        // 使用正常关闭码
+        wsRef.current.close(1000, 'Component unmounting')
+        wsRef.current = null
       }
     }
   }, [url])
@@ -86,9 +125,8 @@ export function useWebSocket(url: string): UseWebSocketReturn {
   const sendMessage = (message: SentWSMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       wsRef.current.send(JSON.stringify(message))
-    } else {
-      console.warn('[WebSocket] Cannot send message: not connected')
     }
+    // 不再在未连接时输出警告，避免噪声
   }
 
   return {

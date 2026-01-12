@@ -27,8 +27,9 @@ export function createWebSocketHandler(deps: WebSocketHandlerDependencies): () =
 
     return {
       onOpen(_event: Event, ws: WSContext) {
-        console.log('[WS] Client connected')
         wsContext = ws
+        const stats = commandService.getRoomStats()
+        console.log(`[WS] Client connected, total connections: ${stats.totalClients + 1}`)
         // 客户端连接后需要发送 join 消息来加入房间
       },
 
@@ -104,12 +105,12 @@ export function createWebSocketHandler(deps: WebSocketHandlerDependencies): () =
       },
 
       onClose() {
-        console.log('[WS] Client disconnected')
-
         if (wsContext) {
           commandService.unregisterClient(wsContext)
           wsContext = null
         }
+        const stats = commandService.getRoomStats()
+        console.log(`[WS] Client disconnected, remaining connections: ${stats.totalClients}`)
       },
 
       onError(event: Event) {

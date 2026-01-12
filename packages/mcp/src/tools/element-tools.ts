@@ -45,7 +45,7 @@ function createExcalidrawElement(params: {
   text?: string
   fontSize?: number
   fontFamily?: number
-  points?: [number, number][]
+  points?: { x: number; y: number }[]
   startArrowhead?: string | null
   endArrowhead?: string | null
 }): Record<string, unknown> {
@@ -99,7 +99,9 @@ function createExcalidrawElement(params: {
 
   // 线性元素（箭头、线条）
   if (params.type === 'arrow' || params.type === 'line') {
-    const points = params.points ?? [[0, 0], [params.width ?? 100, params.height ?? 0]]
+    const points = params.points
+      ? params.points.map(p => [p.x, p.y] as [number, number])
+      : [[0, 0], [params.width ?? 100, params.height ?? 0]]
     return {
       ...baseElement,
       points,
@@ -115,7 +117,7 @@ function createExcalidrawElement(params: {
   if (params.type === 'freedraw') {
     return {
       ...baseElement,
-      points: params.points ?? [[0, 0]],
+      points: params.points ? params.points.map(p => [p.x, p.y]) : [[0, 0]],
       pressures: [],
       simulatePressure: true,
       lastCommittedPoint: null,
@@ -152,8 +154,8 @@ export function registerElementTools(server: McpServer, client: ExcalidrawClient
         text: z.string().optional().describe('Text content (for text elements)'),
         fontSize: z.number().optional().default(20).describe('Font size (for text elements)'),
         fontFamily: z.number().optional().default(1).describe('Font family (1=Virgil, 2=Helvetica, 3=Cascadia)'),
-        points: z.array(z.tuple([z.number(), z.number()])).optional()
-          .describe('Points for linear elements (arrow, line, freedraw)'),
+        points: z.array(z.object({ x: z.number(), y: z.number() })).optional()
+          .describe('Points for linear elements (arrow, line, freedraw). Each point has x and y coordinates.'),
         startArrowhead: ArrowheadSchema.optional().describe('Start arrowhead type (for arrows)'),
         endArrowhead: ArrowheadSchema.optional().default('arrow').describe('End arrowhead type (for arrows)'),
       },
